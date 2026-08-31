@@ -4,7 +4,7 @@ export const runtime = "nodejs";
 
 const MAX_NOTES = 40;
 const MAX_CONNECTIONS = 60;
-const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
+const GROQ_RESPONSES_URL = "https://api.groq.com/openai/v1/responses";
 
 type BoardNoteInput = {
   id: string;
@@ -106,8 +106,8 @@ const pitchSchema = {
 } as const;
 
 export async function POST(request: Request) {
-  if (!process.env.OPENAI_API_KEY) {
-    return NextResponse.json({ error: "OpenAI is not configured. Add OPENAI_API_KEY to .env.local and restart the dev server." }, { status: 503 });
+  if (!process.env.GROQ_API_KEY) {
+    return NextResponse.json({ error: "Groq is not configured. Add GROQ_API_KEY to .env.local and restart the dev server." }, { status: 503 });
   }
 
   let payload: unknown;
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
   const board = readBoard(isRecord(payload) ? payload.board : null);
   if (!board) return NextResponse.json({ error: "The board snapshot is invalid." }, { status: 400 });
 
-  const model = process.env.OPENAI_MODEL || "gpt-5.6-luna";
+  const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
   const prompt = [
     "You are AIchemist, an invited collaborative teammate on a visual whiteboard.",
     "Study the board snapshot and contribute exactly one specific, constructive sticky note. It can identify an assumption, propose a next step, or make a new connection.",
@@ -130,40 +130,40 @@ export async function POST(request: Request) {
 
   let upstream: Response;
   try {
-    upstream = await fetch(OPENAI_RESPONSES_URL, {
+    upstream = await fetch(GROQ_RESPONSES_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
       },
       body: JSON.stringify({
         model,
-        store: false,
         max_output_tokens: 180,
+        reasoning_effort: "medium",
         input: prompt,
         text: { format: { type: "json_schema", name: "aichemist_contribution", strict: true, schema: pitchSchema } },
       }),
       signal: AbortSignal.timeout(20_000),
     });
   } catch (error) {
-    console.error("AIchemist could not reach OpenAI", error);
-    return NextResponse.json({ error: "AIchemist could not reach OpenAI. Check your network connection and try again." }, { status: 502 });
+    console.error("AIchemist could not reach Groq", error);
+    return NextResponse.json({ error: "AIchemist could not reach Groq. Check your network connection and try again." }, { status: 502 });
   }
 
   const upstreamBody: unknown = await upstream.json().catch(() => null);
   if (!upstream.ok) {
-    const message = isRecord(upstreamBody) && isRecord(upstreamBody.error) ? text(upstreamBody.error.message, 240) : "OpenAI could not generate a contribution.";
-    return NextResponse.json({ error: message || "OpenAI could not generate a contribution." }, { status: 502 });
+    const message = isRecord(upstreamBody) && isRecord(upstreamBody.error) ? text(upstreamBody.error.message, 240) : "Groq could not generate a contribution.";
+    return NextResponse.json({ error: message || "Groq could not generate a contribution." }, { status: 502 });
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(outputText(upstreamBody));
   } catch {
-    return NextResponse.json({ error: "OpenAI returned an unreadable contribution." }, { status: 502 });
+    return NextResponse.json({ error: "Groq returned an unreadable contribution." }, { status: 502 });
   }
   const contribution = readContribution(parsed, new Set(board.notes.map((note) => note.id)));
-  if (!contribution) return NextResponse.json({ error: "OpenAI returned an invalid board contribution." }, { status: 502 });
+  if (!contribution) return NextResponse.json({ error: "Groq returned an invalid board contribution." }, { status: 502 });
 
   return NextResponse.json({ contribution, model });
 }

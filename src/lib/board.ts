@@ -71,6 +71,8 @@ const defaultMembers: BoardMember[] = [
   { id: "aichemist", name: "AIchemist", initials: "✦", role: "AI teammate", color: "#a78bfa" },
 ];
 
+const blankSessionMembers = defaultMembers.filter((member) => member.id !== "sarah");
+
 function clock() {
   return new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(new Date());
 }
@@ -129,7 +131,7 @@ function newBoard(): BoardState {
 function blankBoard(title: string, actorId: MemberId): BoardState {
   return {
     title: title.trim() || "Untitled brainstorm",
-    members: defaultMembers.map((member) => ({ ...member })),
+    members: blankSessionMembers.map((member) => ({ ...member })),
     notes: [],
     connections: [],
     clusters: [],
