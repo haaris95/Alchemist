@@ -62,7 +62,7 @@ export default function Workspace({ boardId }: { boardId?: string }) {
   const router = useRouter();
   const board = useBoard();
   const { member: currentMember } = useCurrentMember();
-  const { status: syncStatus, error: syncError, isPersistent } = useBoardPersistence(boardId);
+  const { status: syncStatus, error: syncError, isPersistent, isReady } = useBoardPersistence(boardId);
   const [newIdea, setNewIdea] = useState("");
   const [newIdeaColor, setNewIdeaColor] = useState<StickyColor>("sun");
   const [comment, setComment] = useState("");
@@ -88,6 +88,7 @@ export default function Workspace({ boardId }: { boardId?: string }) {
   const autoPitch = board.aiAutonomy;
 
   useEffect(() => {
+    if (isPersistent) return;
     boardStore.hydrate();
     try {
       const localMember = window.localStorage.getItem("aichemist-member");
@@ -97,11 +98,12 @@ export default function Workspace({ boardId }: { boardId?: string }) {
       if (window.location.search.includes("new=1")) setShowNewSession(true);
     });
     return () => window.cancelAnimationFrame(showNewSessionFrame);
-  }, []);
+  }, [isPersistent]);
 
   useEffect(() => {
+    if (!isReady) return;
     boardStore.setCurrentUser(currentMember.name, currentMember.id);
-  }, [currentMember]);
+  }, [currentMember, isReady]);
 
   const performPitchIn = useCallback(async (signal: AbortSignal, intent: PitchIntent = "independent") => {
     boardStore.setAiStatus("thinking");
@@ -126,7 +128,7 @@ export default function Workspace({ boardId }: { boardId?: string }) {
 
   useEffect(() => {
     const latestActivity = board.activity[0];
-    if (!autoPitch || board.aiStatus === "thinking" || board.notes.length === 0 || !latestActivity || latestActivity.actorId === "aichemist" || autoPitchActivityIdRef.current === latestActivity.id) return;
+    if (!isReady || !autoPitch || board.aiStatus === "thinking" || board.notes.length === 0 || !latestActivity || latestActivity.actorId === "aichemist" || autoPitchActivityIdRef.current === latestActivity.id) return;
     const intent: PitchIntent = board.notes.length % 3 === 0 ? "challenge" : "independent";
     const timer = window.setTimeout(() => {
       if (autoPitchActivityIdRef.current === latestActivity.id) return;
@@ -134,21 +136,21 @@ export default function Workspace({ boardId }: { boardId?: string }) {
       void performPitchIn(new AbortController().signal, intent).catch(() => undefined);
     }, 6000);
     return () => window.clearTimeout(timer);
-  }, [autoPitch, board.activity, board.aiStatus, board.notes.length, performPitchIn]);
+  }, [autoPitch, board.activity, board.aiStatus, board.notes.length, isReady, performPitchIn]);
 
   useEffect(() => {
     const sessionActivity = board.activity[0];
-    if (!autoPitch || board.aiStatus === "thinking" || board.notes.length !== 0 || !sessionActivity || sessionActivity.actorId === "aichemist" || blankRoomPitchIdRef.current === sessionActivity.id) return;
+    if (!isReady || !autoPitch || board.aiStatus === "thinking" || board.notes.length !== 0 || !sessionActivity || sessionActivity.actorId === "aichemist" || blankRoomPitchIdRef.current === sessionActivity.id) return;
     const timer = window.setTimeout(() => {
       if (blankRoomPitchIdRef.current === sessionActivity.id || boardStore.getSnapshot().notes.length !== 0) return;
       blankRoomPitchIdRef.current = sessionActivity.id;
       void performPitchIn(new AbortController().signal, "starter").catch(() => undefined);
     }, 6000);
     return () => window.clearTimeout(timer);
-  }, [autoPitch, board.activity, board.aiStatus, board.notes.length, performPitchIn]);
+  }, [autoPitch, board.activity, board.aiStatus, board.notes.length, isReady, performPitchIn]);
 
   useEffect(() => {
-    if (!autoPitch) return;
+    if (!isReady || !autoPitch) return;
     const timer = window.setInterval(() => {
       if (boardStore.getSnapshot().aiStatus === "thinking") return;
       const cycle: PitchIntent[] = ["independent", "challenge", "independent"];
@@ -157,7 +159,7 @@ export default function Workspace({ boardId }: { boardId?: string }) {
       void performPitchIn(new AbortController().signal, intent).catch(() => undefined);
     }, 120_000);
     return () => window.clearInterval(timer);
-  }, [autoPitch, performPitchIn]);
+  }, [autoPitch, isReady, performPitchIn]);
 
   const onCreateNote = useCallback((input: { text: string; color?: StickyColor; x?: number; y?: number }) => {
     const result = boardStore.createNote({ ...input, authorId: "aichemist", color: input.color ?? "lavender" });
@@ -250,6 +252,10 @@ export default function Workspace({ boardId }: { boardId?: string }) {
       setShareLink(link);
       await navigator.clipboard?.writeText(link);
     } catch (shareError) { setShareError(shareError instanceof Error ? shareError.message : "Could not create a share link."); }
+  }
+
+  if (isPersistent && !isReady) {
+    return <main className="app-shell board-loading"><section><span className="session-orb">✦</span><p className="landing-kicker">SAVED SESSION</p><h1>{syncStatus === "error" ? "This board could not be opened." : "Opening your board…"}</h1><p>{syncError ?? "Loading the correct shared canvas, members, and activity trail."}</p><Link href="/dashboard">← Back to your sessions</Link></section></main>;
   }
 
   return <main className="app-shell">

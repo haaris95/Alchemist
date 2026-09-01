@@ -13,8 +13,10 @@ export type BoardSyncStatus = "local" | "connecting" | "synced" | "saving" | "er
  * board id is present; the original local board remains a no-configuration preview.
  */
 export function useBoardPersistence(boardId?: string) {
-  const [status, setStatus] = useState<BoardSyncStatus>(() => boardId && isSupabaseConfigured() ? "connecting" : "local");
+  const persistentBoard = Boolean(boardId && isSupabaseConfigured());
+  const [status, setStatus] = useState<BoardSyncStatus>(() => persistentBoard ? "connecting" : "local");
   const [error, setError] = useState<string | null>(null);
+  const [isReady, setIsReady] = useState(() => !persistentBoard);
 
   useEffect(() => {
     if (!boardId || !isSupabaseConfigured()) {
@@ -22,6 +24,7 @@ export function useBoardPersistence(boardId?: string) {
     }
 
     let disposed = false;
+    let remoteDocumentLoaded = false;
     let applyingRemote = false;
     let saveTimer: number | undefined;
     let lastRemote = "";
@@ -32,12 +35,14 @@ export function useBoardPersistence(boardId?: string) {
       applyingRemote = true;
       boardStore.replaceDocument(document);
       applyingRemote = false;
+      remoteDocumentLoaded = true;
       setStatus("synced");
       setError(null);
+      setIsReady(true);
     }
 
     async function saveDocument() {
-      if (disposed || applyingRemote) return;
+      if (disposed || applyingRemote || !remoteDocumentLoaded) return;
       const document = boardStore.documentForPersistence();
       const fingerprint = JSON.stringify(document);
       if (fingerprint === lastRemote) return;
@@ -64,7 +69,7 @@ export function useBoardPersistence(boardId?: string) {
     }
 
     function scheduleSave() {
-      if (disposed || applyingRemote) return;
+      if (disposed || applyingRemote || !remoteDocumentLoaded) return;
       window.clearTimeout(saveTimer);
       saveTimer = window.setTimeout(() => void saveDocument(), 550);
     }
@@ -107,6 +112,10 @@ export function useBoardPersistence(boardId?: string) {
     };
   }, [boardId]);
 
-  const isPersistent = Boolean(boardId && isSupabaseConfigured());
-  return { status: isPersistent ? status : "local", error: isPersistent ? error : null, isPersistent };
+  return {
+    status: persistentBoard ? status : "local",
+    error: persistentBoard ? error : null,
+    isPersistent: persistentBoard,
+    isReady: persistentBoard ? isReady : true,
+  };
 }
