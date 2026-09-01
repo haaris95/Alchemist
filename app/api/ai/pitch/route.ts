@@ -4,7 +4,7 @@ import { AiPitchError, generateAiContribution, readAgentBoard, type PitchIntent 
 export const runtime = "nodejs";
 
 function readIntent(value: unknown): PitchIntent {
-  return value === "feedback" || value === "challenge" || value === "independent" || value === "sketch" ? value : "feedback";
+  return value === "feedback" || value === "challenge" || value === "independent" || value === "sketch" || value === "diagram" ? value : "feedback";
 }
 
 export async function POST(request: Request) {
@@ -17,7 +17,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Add a session brief or a first human idea before asking AIchemist to contribute." }, { status: 400 });
   }
   const requestedIntent = readIntent(object?.intent);
-  const intent: PitchIntent = requestedIntent === "sketch" ? "sketch" : humanNotes < 2 ? "feedback" : requestedIntent;
+  const intent: PitchIntent = requestedIntent === "sketch" || requestedIntent === "diagram" ? requestedIntent : humanNotes < 2 ? "feedback" : requestedIntent;
   try {
     const contribution = await generateAiContribution(board, intent);
     return NextResponse.json({ contribution, model: process.env.GROQ_MODEL || "openai/gpt-oss-120b" });

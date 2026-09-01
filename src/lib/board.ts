@@ -46,6 +46,11 @@ export type BoardStroke = {
   authorId: MemberId;
 };
 
+export type DiagramTemplate = "flow" | "comparison" | "tradeoff";
+export type DiagramNodeInput = { label: string; color?: StickyColor };
+export type DiagramEdgeInput = { from: number; to: number; label?: string };
+export type DiagramInput = { template: DiagramTemplate; title: string; nodes: DiagramNodeInput[]; edges?: DiagramEdgeInput[]; authorId?: MemberId };
+
 export type ActivityEvent = {
   id: string;
   actorId: MemberId;
@@ -191,6 +196,21 @@ function nextPosition() {
   return { x: 100 + (index % 4) * 220, y: 470 + (Math.floor(index / 4) % 2) * 34 };
 }
 
+function diagramPositions(template: DiagramTemplate, count: number) {
+  const flow = [{ x: 85, y: 275 }, { x: 345, y: 275 }, { x: 605, y: 275 }, { x: 850, y: 275 }];
+  if (template === "flow") return flow.slice(0, count);
+  if (template === "comparison") {
+    const positions = count === 2
+      ? [{ x: 165, y: 275 }, { x: 695, y: 275 }]
+      : [{ x: 90, y: 275 }, { x: 430, y: 155 }, { x: 770, y: 275 }, { x: 430, y: 410 }];
+    return positions.slice(0, count);
+  }
+  const positions = count === 2
+    ? [{ x: 205, y: 180 }, { x: 655, y: 395 }]
+    : [{ x: 430, y: 130 }, { x: 150, y: 390 }, { x: 710, y: 390 }, { x: 430, y: 500 }];
+  return positions.slice(0, count);
+}
+
 export const boardStore = {
   getSnapshot: () => board,
   getServerSnapshot: () => serverSnapshot,
@@ -279,6 +299,43 @@ export const boardStore = {
     const actor = member(note.authorId);
     commit({ ...board, notes: [...board.notes, note], activity: [activity(note.authorId, `added ${noteLabel(note)}`), ...board.activity].slice(0, 16) });
     return { note, actor };
+  },
+  createDiagram(input: DiagramInput) {
+    const title = input.title.trim().slice(0, 80);
+    if (!title || input.nodes.length < 2 || input.nodes.length > 4) throw new Error("A diagram needs a title and two to four labeled nodes.");
+    const authorId = input.authorId ?? "aichemist";
+    const palette: StickyColor[] = ["lavender", "mint", "sun", "rose"];
+    const positions = diagramPositions(input.template, input.nodes.length);
+    const seed = `${Date.now()}-${Math.round(Math.random() * 1000)}`;
+    const nodes = input.nodes.map((node, index): BoardNote => {
+      const label = node.label.trim().slice(0, 120);
+      if (label.length < 3) throw new Error("Every diagram node needs a label.");
+      return {
+        id: `diagram-node-${seed}-${index}`,
+        text: label,
+        authorId,
+        color: node.color ?? palette[index % palette.length],
+        x: positions[index].x,
+        y: positions[index].y,
+        comments: [],
+        createdAt: clock(),
+      };
+    });
+    const requestedEdges: DiagramEdgeInput[] = input.edges?.length ? input.edges : nodes.slice(1).map((_, index) => ({ from: index, to: index + 1 }));
+    const connections: BoardConnection[] = requestedEdges.flatMap((edge, index) => {
+      if (!Number.isInteger(edge.from) || !Number.isInteger(edge.to) || edge.from < 0 || edge.to < 0 || edge.from >= nodes.length || edge.to >= nodes.length || edge.from === edge.to) return [];
+      return [{ id: `diagram-connection-${seed}-${index}`, fromId: nodes[edge.from].id, toId: nodes[edge.to].id, label: edge.label?.trim().slice(0, 50) || undefined, authorId }];
+    });
+    const cluster: BoardCluster = { id: `diagram-cluster-${seed}`, label: title, x: 42, y: 82, width: 1015, height: 525 };
+    const templateLabel = input.template === "flow" ? "visual flow" : input.template === "comparison" ? "comparison map" : "trade-off map";
+    commit({
+      ...board,
+      notes: [...board.notes, ...nodes],
+      connections: [...board.connections, ...connections],
+      clusters: [...board.clusters, cluster],
+      activity: [activity(authorId, `created a ${templateLabel}`), ...board.activity].slice(0, 16),
+    });
+    return { cluster, nodes, connections };
   },
   moveNote(noteId: string, x: number, y: number) {
     const note = board.notes.find((item) => item.id === noteId);

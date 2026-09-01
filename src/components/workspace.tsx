@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { FormEvent, PointerEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { boardStore, type BoardConnection, type BoardNote, type BoardStroke, type MemberId, type StickyColor } from "@/lib/board";
+import { boardStore, type BoardConnection, type BoardNote, type BoardStroke, type DiagramInput, type MemberId, type StickyColor } from "@/lib/board";
 import { useBoard } from "@/hooks/use-board";
 import { useWebMCPTools } from "@/hooks/use-webmcp-tools";
 import { useBoardPersistence } from "@/hooks/use-board-persistence";
@@ -16,8 +16,9 @@ type GroqContribution = {
   connectToNoteId: string;
   connectionLabel: string;
   strokes: Array<{ points: Array<{ x: number; y: number }>; color: string; width: number }>;
+  diagram?: Pick<DiagramInput, "template" | "title" | "nodes" | "edges">;
 };
-type PitchIntent = "feedback" | "independent" | "challenge" | "sketch";
+type PitchIntent = "feedback" | "independent" | "challenge" | "sketch" | "diagram";
 
 const STICKY_COLORS: StickyColor[] = ["sun", "rose", "mint", "lavender"];
 const SESSION_BRIEF_MIN_LENGTH = 24;
@@ -40,6 +41,18 @@ function isGroqStroke(value: unknown): value is GroqContribution["strokes"][numb
     && typeof stroke.width === "number";
 }
 
+function isGroqDiagram(value: unknown): value is NonNullable<GroqContribution["diagram"]> {
+  if (!value || typeof value !== "object") return false;
+  const diagram = value as Record<string, unknown>;
+  return (diagram.template === "flow" || diagram.template === "comparison" || diagram.template === "tradeoff")
+    && typeof diagram.title === "string"
+    && Array.isArray(diagram.nodes)
+    && diagram.nodes.length >= 2
+    && diagram.nodes.length <= 4
+    && diagram.nodes.every((node) => node && typeof node === "object" && typeof (node as Record<string, unknown>).label === "string" && STICKY_COLORS.includes((node as Record<string, unknown>).color as StickyColor))
+    && Array.isArray(diagram.edges);
+}
+
 function isGroqContribution(value: unknown): value is GroqContribution {
   if (!value || typeof value !== "object") return false;
   const contribution = value as Record<string, unknown>;
@@ -48,7 +61,8 @@ function isGroqContribution(value: unknown): value is GroqContribution {
     && typeof contribution.connectToNoteId === "string"
     && typeof contribution.connectionLabel === "string"
     && Array.isArray(contribution.strokes)
-    && contribution.strokes.every(isGroqStroke);
+    && contribution.strokes.every(isGroqStroke)
+    && (contribution.diagram === undefined || isGroqDiagram(contribution.diagram));
 }
 
 async function getGroqContribution(signal: AbortSignal, intent: PitchIntent) {
@@ -140,8 +154,9 @@ export default function Workspace({ boardId }: { boardId?: string }) {
         ? boardStore.createConnection({ fromId: contribution.connectToNoteId, toId: result.note.id, label: contribution.connectionLabel, authorId: "aichemist" })
         : null;
       const strokes = contribution.strokes.map((stroke) => boardStore.addStroke({ ...stroke, authorId: "aichemist" }));
+      const diagram = contribution.diagram ? boardStore.createDiagram({ ...contribution.diagram, authorId: "aichemist" }) : null;
       setSelectedNoteId(result.note.id);
-      return { note: result.note, connection: connection?.connection, strokes, insight: contribution.strokes.length ? "AIchemist contributed a visual sketch through Groq." : "AIchemist contributed through Groq." };
+      return { note: result.note, connection: connection?.connection, strokes, diagram, insight: diagram ? "AIchemist built a deterministic visual map through Groq." : contribution.strokes.length ? "AIchemist contributed a visual sketch through Groq." : "AIchemist contributed through Groq." };
     } catch (error) {
       if (!(error instanceof DOMException && error.name === "AbortError")) {
         setAiError(error instanceof Error ? error.message : "AIchemist could not reach Groq right now.");
@@ -210,6 +225,7 @@ export default function Workspace({ boardId }: { boardId?: string }) {
   const onUpdateConnection = useCallback((input: { connectionId: string; label?: string }) => boardStore.updateConnection({ ...input, authorId: "aichemist" }), []);
   const onDeleteConnection = useCallback((input: { connectionId: string }) => boardStore.deleteConnection(input.connectionId, "aichemist"), []);
   const onDrawStroke = useCallback((input: { points: Array<{ x: number; y: number }>; color?: string; width?: number }) => boardStore.addStroke({ ...input, authorId: "aichemist" }), []);
+  const onCreateDiagram = useCallback((input: Omit<DiagramInput, "authorId">) => boardStore.createDiagram({ ...input, authorId: "aichemist" }), []);
   const onGetBoard = useCallback(() => boardStore.boardForAgent(), []);
   const onStatus = useCallback((status: "ready" | "unavailable") => setMcpStatus(status), []);
   const onPitchIn = useCallback((signal: AbortSignal) => {
@@ -222,7 +238,7 @@ export default function Workspace({ boardId }: { boardId?: string }) {
   }, [performPitchIn]);
   useWebMCPTools({
     onGetBoard, onCreateSession, onCreateNote, onMoveNote, onUpdateNote, onDeleteNote, onAddComment,
-    onCreateConnection, onUpdateConnection, onDeleteConnection, onDrawStroke, onPitchIn, onStatus,
+    onCreateConnection, onUpdateConnection, onDeleteConnection, onDrawStroke, onCreateDiagram, onPitchIn, onStatus,
   });
 
   function addHumanIdea(event: FormEvent) {
@@ -239,13 +255,13 @@ export default function Workspace({ boardId }: { boardId?: string }) {
     if (isPersistent) { router.push("/dashboard?new=1"); return; }
     boardStore.createSession(sessionName, currentMember.id, sessionDescription); setSelectedNoteId(null); setSessionName(""); setSessionDescription(""); setShowNewSession(false); window.history.replaceState({}, "", "/workspace");
   }
-  function requestAiInput(request: "challenge" | "sketch" = "challenge") {
+  function requestAiInput(request: "challenge" | "diagram" = "challenge") {
     const humanNotes = humanIdeaCount(board.notes);
     if (humanNotes === 0 && !hasUsefulSessionBrief(board.description)) {
       setAiError("Add a session brief or your first idea so AIchemist has real context to respond to.");
       return;
     }
-    const intent: PitchIntent = request === "sketch" ? "sketch" : humanNotes < 2 ? "feedback" : "challenge";
+    const intent: PitchIntent = request === "diagram" ? "diagram" : humanNotes < 2 ? "feedback" : "challenge";
     void performPitchIn(new AbortController().signal, intent).catch(() => undefined);
   }
   function beginDrag(event: PointerEvent<HTMLButtonElement>, note: BoardNote) {
@@ -311,11 +327,11 @@ export default function Workspace({ boardId }: { boardId?: string }) {
       <div className="canvas-card"><div className="canvas-toolbar"><div><span className="live-dot"></span><strong>Live canvas</strong><small>{canvasTool === "draw" ? "Sketch freely on the board" : canvasTool === "connector" ? connectionStartId ? "Choose another note to connect" : "Choose the first note to connect" : "Drag ideas to make space"}</small></div><div className="canvas-mode-tools"><button className={canvasTool === "select" ? "is-active" : ""} onClick={() => { setCanvasTool("select"); setConnectionStartId(null); }} aria-label="Select and move">↖ <span>Select</span></button><button className={canvasTool === "draw" ? "is-active" : ""} onClick={() => { setCanvasTool("draw"); setConnectionStartId(null); }} aria-label="Draw on canvas">〰 <span>Draw</span></button><button className={canvasTool === "connector" ? "is-active" : ""} onClick={() => setCanvasTool("connector")} aria-label="Connect ideas">⌁ <span>Connect</span></button></div><div className="canvas-tools"><button onClick={() => setZoom((value) => Math.max(0.76, Number((value - 0.1).toFixed(2))))} aria-label="Zoom out">−</button><span>{Math.round(zoom * 100)}%</span><button onClick={() => setZoom((value) => Math.min(1.15, Number((value + 0.1).toFixed(2))))} aria-label="Zoom in">+</button><button className="fit-button" onClick={() => setZoom(1)}>Fit</button></div></div>
         <div className="canvas-viewport"><div className="canvas-scene" ref={canvasRef} style={{ transform: `scale(${zoom})` }} onPointerMove={dragNote} onPointerUp={stopDrag} onPointerCancel={stopDrag}>{board.clusters.map((cluster) => <div className="cluster" key={cluster.id} style={{ left: cluster.x, top: cluster.y, width: cluster.width, height: cluster.height }}><span>{cluster.label}</span></div>)}<svg className="connections" viewBox="0 0 1100 680" aria-hidden="true"><defs><marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" /></marker></defs>{board.connections.map((connection) => { const line = connectionFor(connection); return line ? <g key={connection.id} className={connection.authorId === "aichemist" ? "connection connection--ai" : "connection"}><path d={line.d} markerEnd="url(#arrowhead)" /><text x={line.x} y={line.y - 10}>{connection.label}</text></g> : null; })}</svg>{board.notes.map((note) => { const author = memberFor(note.authorId); return <button key={note.id} className={`sticky sticky--${note.color} ${note.authorId === "aichemist" ? "sticky--ai" : ""} ${note.id === selectedNoteId ? "sticky--selected" : ""} ${connectionStartId === note.id ? "sticky--connection-origin" : ""}`} style={{ left: note.x, top: note.y }} onPointerDown={(event) => beginDrag(event, note)} onClick={() => setSelectedNoteId(note.id)}><span className="sticky-author"><i style={{ background: author.color }}>{author.initials}</i>{author.name}</span><strong>{note.text}</strong><span className="sticky-footer"><small>{note.createdAt}</small>{note.comments.length > 0 && <em>◌ {note.comments.length}</em>}</span></button>; })}<svg className={`drawing-layer ${canvasTool === "draw" ? "drawing-layer--active" : ""}`} viewBox="0 0 1100 680" onPointerDown={beginDrawing} onPointerMove={continueDrawing} onPointerUp={finishDrawing} onPointerCancel={finishDrawing}>{board.strokes.map((stroke) => <path key={stroke.id} d={strokePath(stroke)} stroke={stroke.color} strokeWidth={stroke.width} />)}{activeStroke.length > 1 && <path d={strokePath({ points: activeStroke })} stroke="#45405b" strokeWidth="3" />}</svg>{board.aiStatus === "thinking" && <div className="ai-cursor"><span>✦</span><p>AIchemist is thinking…</p></div>}</div></div>
       <div className="canvas-footer"><span><i className="human-key"></i> Human idea</span><span><i className="ai-key"></i> AIchemist contribution</span><span><i className="line-key"></i> Connected thinking</span><span><i className="draw-key"></i> Sketch</span><p>{canvasTool === "connector" ? "Click two notes to create a relationship." : "Select a tool, then work directly on the canvas."}</p></div></div>
-    </div><aside className="sidebar"><section className={`ai-presence ${board.aiStatus === "thinking" ? "ai-presence--thinking" : ""}`}><div className="ai-presence-head"><span className="ai-orb">✦</span><div><strong>AIchemist</strong><p>{board.aiStatus === "thinking" ? "Thinking with the board" : autoPitch ? "Autonomous Groq teammate" : "Available on request"}</p></div><span className="presence-status">{board.aiStatus === "thinking" ? "WORKING" : autoPitch ? "AUTO" : "ACTIVE"}</span></div><p className="ai-presence-copy">{board.aiStatus === "thinking" ? "Looking for a missing criterion, assumption, or strong challenge." : autoPitch ? "I’ll first respond to your brief. Once the room has at least two human ideas, I’ll independently add directions and challenge assumptions." : "I’ll wait for you to invite me into the conversation."}</p><label className="autopilot-switch"><span><i>✦</i> Let AIchemist pitch in autonomously</span><input type="checkbox" checked={autoPitch} onChange={(event) => boardStore.setAiAutonomy(event.target.checked)} /><b></b></label><button className="pitch-button" disabled={board.aiStatus === "thinking"} onClick={() => requestAiInput()}>{board.aiStatus === "thinking" ? <><span className="thinking-ring"></span> Thinking…</> : humanIdeaCount(board.notes) < 2 ? <><span>✦</span> Ask AIchemist for feedback</> : <><span>✦</span> Ask AIchemist to challenge or pitch in</>}</button><button className="pitch-button pitch-button--sketch" disabled={board.aiStatus === "thinking"} onClick={() => requestAiInput("sketch")}><span>〰</span> Ask AIchemist to sketch this</button><small className={`pitch-note ${aiError || syncError ? "pitch-note--error" : ""}`}>{aiError ?? syncError ?? "Give it a brief or an idea, then ask for a visual framing of the conversation."}</small></section>
+    </div><aside className="sidebar"><section className={`ai-presence ${board.aiStatus === "thinking" ? "ai-presence--thinking" : ""}`}><div className="ai-presence-head"><span className="ai-orb">✦</span><div><strong>AIchemist</strong><p>{board.aiStatus === "thinking" ? "Thinking with the board" : autoPitch ? "Autonomous Groq teammate" : "Available on request"}</p></div><span className="presence-status">{board.aiStatus === "thinking" ? "WORKING" : autoPitch ? "AUTO" : "ACTIVE"}</span></div><p className="ai-presence-copy">{board.aiStatus === "thinking" ? "Looking for a missing criterion, assumption, or strong challenge." : autoPitch ? "I’ll first respond to your brief. Once the room has at least two human ideas, I’ll independently add directions and challenge assumptions." : "I’ll wait for you to invite me into the conversation."}</p><label className="autopilot-switch"><span><i>✦</i> Let AIchemist pitch in autonomously</span><input type="checkbox" checked={autoPitch} onChange={(event) => boardStore.setAiAutonomy(event.target.checked)} /><b></b></label><button className="pitch-button" disabled={board.aiStatus === "thinking"} onClick={() => requestAiInput()}>{board.aiStatus === "thinking" ? <><span className="thinking-ring"></span> Thinking…</> : humanIdeaCount(board.notes) < 2 ? <><span>✦</span> Ask AIchemist for feedback</> : <><span>✦</span> Ask AIchemist to challenge or pitch in</>}</button><button className="pitch-button pitch-button--diagram" disabled={board.aiStatus === "thinking"} onClick={() => requestAiInput("diagram")}><span>▦</span> Map this visually</button><small className={`pitch-note ${aiError || syncError ? "pitch-note--error" : ""}`}>{aiError ?? syncError ?? "Give it a brief or an idea, then ask for a deterministic visual map."}</small></section>
       <section className="members-card"><div className="section-heading"><div><p className="eyebrow">IN THE ROOM</p><h2>Project members</h2></div><span>{board.members.length}</span></div><div className="member-list">{board.members.map((member) => <div className="member" key={member.id}><span className={`member-avatar ${member.id === "aichemist" ? "member-avatar--ai" : ""}`} style={{ background: member.color }}>{member.initials}</span><div><strong>{member.name}</strong><small>{member.role}</small></div>{member.id === "aichemist" && <i className={board.aiStatus === "thinking" ? "member-state member-state--thinking" : "member-state"}>{board.aiStatus === "thinking" ? "thinking" : autoPitch ? "roaming" : "here"}</i>}</div>)}</div></section>
       <section className="activity-card"><div className="section-heading"><div><p className="eyebrow">LIVE TRAIL</p><h2>Activity</h2></div><span className="activity-live"><i></i> Live</span></div><ol>{board.activity.slice(0, 6).map((item) => { const actor = memberFor(item.actorId); return <li key={item.id}><span className={`event-avatar ${item.actorId === "aichemist" ? "event-avatar--ai" : ""}`} style={{ background: actor.color }}>{actor.initials}</span><p><strong>{actor.name}</strong> {item.message}<small>{item.timestamp}</small></p></li>; })}</ol></section>
       <section className="focus-card"><p className="eyebrow">{selectedNote ? "IDEA FOCUS" : "SELECT AN IDEA"}</p>{selectedNote ? <><h2>{selectedNote.text}</h2><div className="comment-list">{selectedNote.comments.length ? selectedNote.comments.map((item, index) => <p key={`${item}-${index}`}><span>{memberFor("haaris").initials}</span>{item}</p>) : <p className="empty-comment">No comments yet. Pull someone into the thought.</p>}</div><form onSubmit={addComment}><input value={comment} onChange={(event) => setComment(event.target.value)} placeholder="Leave a comment…" aria-label="Leave a comment" /><button type="submit" aria-label="Post comment">↑</button></form></> : <p>Click a sticky note to see its context and leave a comment.</p>}</section>
-      <section className="webmcp-card"><div><span className="webmcp-mark">⌘</span><span><strong>WebMCP</strong><small>{mcpStatus === "ready" ? "12 native tools registered" : "Feature detection enabled"}</small></span></div><p>AI agents can inspect, create, move, edit, comment, sketch, connect, and remove board content through the same live session state.</p></section></aside></section>
+      <section className="webmcp-card"><div><span className="webmcp-mark">⌘</span><span><strong>WebMCP</strong><small>{mcpStatus === "ready" ? "13 native tools registered" : "Feature detection enabled"}</small></span></div><p>AI agents can inspect, create, move, edit, comment, map, sketch, connect, and remove board content through the same live session state.</p></section></aside></section>
     {showNewSession && <div className="session-modal-backdrop" role="presentation"><section className="session-modal" role="dialog" aria-modal="true" aria-labelledby="new-session-title"><button className="modal-close" onClick={() => setShowNewSession(false)} aria-label="Close new session dialog">×</button><span className="session-orb">✦</span><p className="landing-kicker">NEW SESSION</p><h2 id="new-session-title">What are you thinking about?</h2><p>Give AIchemist a short brief and it will start with feedback. It waits for human ideas before introducing its own direction.</p><form onSubmit={createSession}><label>Session prompt<input autoFocus value={sessionName} onChange={(event) => setSessionName(event.target.value)} placeholder="e.g. How might we make team rituals more useful?" /></label><label>Context for AIchemist <small>Optional, but recommended</small><textarea value={sessionDescription} onChange={(event) => setSessionDescription(event.target.value)} placeholder="Goal, collaborators, constraints, and what a useful outcome would be." maxLength={900} /></label><button type="submit">Create blank session <span>→</span></button></form><small>This local-preview session stays in this browser until Supabase is configured.</small></section></div>}
     {showShare && <div className="session-modal-backdrop" role="presentation"><section className="session-modal" role="dialog" aria-modal="true" aria-labelledby="share-session-title"><button className="modal-close" onClick={() => setShowShare(false)} aria-label="Close share dialog">×</button><span className="session-orb">↗</span><p className="landing-kicker">INVITE COLLABORATORS</p><h2 id="share-session-title">Share this live room.</h2><p>People with this link can join as editors and see the same canvas in real time.</p>{shareLink ? <><label>Invite link<input readOnly value={shareLink} aria-label="Invite link" /></label><button className="share-copy-button" onClick={() => void navigator.clipboard?.writeText(shareLink)}>Copy invite link</button></> : <button className="share-copy-button" onClick={() => void createShareLink()}>Create and copy invite link</button>}{shareError && <p className="dashboard-error">{shareError}</p>}</section></div>}
   </main>;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import type { StickyColor } from "@/lib/board";
+import type { DiagramInput, DiagramTemplate, StickyColor } from "@/lib/board";
 
 type Point = { x: number; y: number };
 type NoteUpdate = { noteId: string; text?: string; color?: StickyColor; x?: number; y?: number };
@@ -18,6 +18,7 @@ type ToolCallbacks = {
   onUpdateConnection: (input: { connectionId: string; label?: string }) => unknown;
   onDeleteConnection: (input: { connectionId: string }) => unknown;
   onDrawStroke: (input: { points: Point[]; color?: string; width?: number }) => unknown;
+  onCreateDiagram: (input: Omit<DiagramInput, "authorId">) => unknown;
   onPitchIn: (signal: AbortSignal) => Promise<unknown>;
   onStatus: (status: "ready" | "unavailable") => void;
 };
@@ -69,10 +70,32 @@ function requiredPoints(input: Record<string, unknown>) {
   });
 }
 
+function requiredDiagram(input: Record<string, unknown>): Omit<DiagramInput, "authorId"> {
+  const template = input.template;
+  if (template !== "flow" && template !== "comparison" && template !== "tradeoff") throw new TypeError("template must be flow, comparison, or tradeoff");
+  const rawNodes = input.nodes;
+  if (!Array.isArray(rawNodes) || rawNodes.length < 2 || rawNodes.length > 4) throw new TypeError("nodes must contain two to four labeled nodes");
+  const nodes = rawNodes.map((rawNode, index) => {
+    if (!rawNode || typeof rawNode !== "object" || Array.isArray(rawNode)) throw new TypeError(`nodes[${index}] must be an object`);
+    const node = rawNode as Record<string, unknown>;
+    return { label: requiredText(node, "label").slice(0, 120), color: optionalColor(node) };
+  });
+  const rawEdges = input.edges;
+  if (rawEdges !== undefined && !Array.isArray(rawEdges)) throw new TypeError("edges must be an array");
+  const edges = (rawEdges ?? []).map((rawEdge, index) => {
+    if (!rawEdge || typeof rawEdge !== "object" || Array.isArray(rawEdge)) throw new TypeError(`edges[${index}] must be an object`);
+    const edge = rawEdge as Record<string, unknown>;
+    const from = requiredNumber(edge, "from"); const to = requiredNumber(edge, "to");
+    if (!Number.isInteger(from) || !Number.isInteger(to) || from < 0 || to < 0 || from >= nodes.length || to >= nodes.length || from === to) throw new TypeError(`edges[${index}] must connect two different node indexes`);
+    return { from, to, label: optionalText(edge, "label") };
+  });
+  return { template: template as DiagramTemplate, title: requiredText(input, "title").slice(0, 80), nodes, edges };
+}
+
 export function useWebMCPTools(callbacks: ToolCallbacks) {
   const {
     onGetBoard, onCreateSession, onCreateNote, onMoveNote, onUpdateNote, onDeleteNote, onAddComment,
-    onCreateConnection, onUpdateConnection, onDeleteConnection, onDrawStroke, onPitchIn, onStatus,
+    onCreateConnection, onUpdateConnection, onDeleteConnection, onDrawStroke, onCreateDiagram, onPitchIn, onStatus,
   } = callbacks;
 
   useEffect(() => {
@@ -153,6 +176,12 @@ export function useWebMCPTools(callbacks: ToolCallbacks) {
         execute: (input) => onDrawStroke({ points: requiredPoints(input), color: optionalText(input, "color"), width: optionalNumber(input, "width") }),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
+        name: "create_diagram", title: "Create a deterministic visual map",
+        description: "Create a structured board diagram. Choose a flow for a sequence, comparison for alternatives, or tradeoff for tensions; provide labeled nodes and their relationships. AIchemist deterministically places the nodes, cluster, and connectors.",
+        inputSchema: { ...schemaBase, properties: { template: { type: "string", enum: ["flow", "comparison", "tradeoff"], description: "The semantic diagram pattern." }, title: { type: "string", minLength: 3, maxLength: 80, description: "Visible label for the diagram cluster." }, nodes: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", additionalProperties: false, properties: { label: { type: "string", minLength: 3, maxLength: 120 }, color: colorSchema }, required: ["label"] }, description: "Two to four concise diagram nodes." }, edges: { type: "array", maxItems: 6, items: { type: "object", additionalProperties: false, properties: { from: { type: "integer", minimum: 0, maximum: 3 }, to: { type: "integer", minimum: 0, maximum: 3 }, label: { type: "string", maxLength: 50 } }, required: ["from", "to"] }, description: "Optional directed relationships by node index." } }, required: ["template", "title", "nodes"] }, annotations: { readOnlyHint: false },
+        execute: (input) => onCreateDiagram(requiredDiagram(input)),
+      }, { signal: controller.signal }),
+      document.modelContext.registerTool({
         name: "pitch_in", title: "Let AIchemist pitch in",
         description: "Examine the current shared board and add one meaningful AIchemist contribution. Before the team has enough human context, provide grounded feedback rather than inventing a new direction.",
         inputSchema: { ...schemaBase, properties: {} }, annotations: { readOnlyHint: false },
@@ -164,5 +193,5 @@ export function useWebMCPTools(callbacks: ToolCallbacks) {
       if (!controller.signal.aborted) { console.warn("AIchemist WebMCP registration failed", error); onStatus("unavailable"); }
     });
     return () => controller.abort();
-  }, [onAddComment, onCreateConnection, onCreateNote, onCreateSession, onDeleteConnection, onDeleteNote, onDrawStroke, onGetBoard, onMoveNote, onPitchIn, onStatus, onUpdateConnection, onUpdateNote]);
+  }, [onAddComment, onCreateConnection, onCreateDiagram, onCreateNote, onCreateSession, onDeleteConnection, onDeleteNote, onDrawStroke, onGetBoard, onMoveNote, onPitchIn, onStatus, onUpdateConnection, onUpdateNote]);
 }
