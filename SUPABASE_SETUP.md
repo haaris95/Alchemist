@@ -3,7 +3,7 @@
 The application runs in local-preview mode until Supabase is connected. Follow these steps to enable real accounts, saved boards, invitations, and real-time collaboration.
 
 1. Create a Supabase project.
-2. In its SQL Editor, run [supabase/migrations/0001_aichemist.sql](supabase/migrations/0001_aichemist.sql). It creates the profiles, boards, member access rules, invitation flow, and Realtime publication.
+2. In its SQL Editor, run the migration files in order: [0001_aichemist.sql](supabase/migrations/0001_aichemist.sql), then [0002_create_board_rpc.sql](supabase/migrations/0002_create_board_rpc.sql). Together they create the profiles, boards, member access rules, invitation flow, Realtime publication, and the atomic board-creation function.
 3. In Supabase **Authentication → URL Configuration**, add these redirect URLs for local work:
 
    - `http://localhost:3001/auth/callback`

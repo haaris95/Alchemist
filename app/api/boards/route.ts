@@ -26,16 +26,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "A title and complete board document are required." }, { status: 400 });
   }
 
-  const { data: board, error: boardError } = await session.supabase
-    .from("boards")
-    .insert({ owner_id: session.user.id, title, document, ai_autonomy: true })
-    .select("id,title,ai_autonomy,created_at,updated_at")
-    .single();
+  const { data: createdBoards, error: boardError } = await session.supabase
+    .rpc("create_board", { board_title: title, board_document: document, board_ai_autonomy: true });
+  const board = Array.isArray(createdBoards) ? createdBoards[0] : null;
   if (boardError || !board) return NextResponse.json({ error: boardError?.message ?? "Could not create the board." }, { status: 400 });
-
-  const { error: memberError } = await session.supabase
-    .from("board_members")
-    .insert({ board_id: board.id, user_id: session.user.id, role: "owner" });
-  if (memberError) return NextResponse.json({ error: memberError.message }, { status: 400 });
   return NextResponse.json({ board }, { status: 201 });
 }
