@@ -20,7 +20,8 @@ The application runs in local-preview mode until Supabase is connected. Follow t
    ```
 
    Keep `SUPABASE_SERVICE_ROLE_KEY` and `CRON_SECRET` server-only. Never prefix them with `NEXT_PUBLIC_` or commit them.
-5. Restart the development server. Sign in with an email link, make a session from `/dashboard`, and use **Share** to create an editor invite.
+5. To make email optional, enable **Authentication → Providers → Anonymous → Enable Anonymous Sign-Ins**. AIchemist's **Continue without email** button then creates a real Supabase guest account that can create and own private boards. It stays signed in in that browser; the guest identity is lost if browser storage is cleared. Enable CAPTCHA before exposing anonymous sign-in publicly.
+6. Restart the development server. You can start as a guest immediately, or use an email link when you need the same account on another device. Then make a session from `/dashboard` and use **Share** to create an editor invite.
 
 ## Background AI autonomy
 
