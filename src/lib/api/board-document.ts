@@ -10,7 +10,8 @@ export function isBoardDocument(value: unknown): value is BoardState {
     && Array.isArray(document.connections)
     && Array.isArray(document.clusters)
     && Array.isArray(document.strokes)
-    && Array.isArray(document.activity);
+    && Array.isArray(document.activity)
+    && (document.webmcpActivity === undefined || Array.isArray(document.webmcpActivity));
 }
 
 export function safeBoardTitle(value: unknown) {

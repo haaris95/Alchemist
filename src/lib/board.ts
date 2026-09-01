@@ -58,6 +58,13 @@ export type ActivityEvent = {
   timestamp: string;
 };
 
+export type WebMCPActivity = {
+  id: string;
+  tool: string;
+  detail: string;
+  timestamp: string;
+};
+
 export type BoardState = {
   title: string;
   description: string;
@@ -67,6 +74,7 @@ export type BoardState = {
   clusters: BoardCluster[];
   strokes: BoardStroke[];
   activity: ActivityEvent[];
+  webmcpActivity: WebMCPActivity[];
   aiStatus: "active" | "thinking";
   aiAutonomy: boolean;
 };
@@ -133,6 +141,7 @@ function newBoard(): BoardState {
       { id: "activity-market", actorId: "sarah", message: 'added “Discount marketplace”', timestamp: "10:44 AM" },
       { id: "activity-surplus", actorId: "haaris", message: 'added “Restaurant surplus”', timestamp: "10:42 AM" },
     ],
+    webmcpActivity: [],
     aiStatus: "active",
     aiAutonomy: true,
   };
@@ -155,6 +164,7 @@ export function createBlankBoard(title: string, actor: BoardMember = defaultMemb
     clusters: [],
     strokes: [],
     activity: [{ id: `activity-session-${Date.now()}-${Math.round(Math.random() * 1000)}`, actorId: actor.id, message: "started a new blank session", timestamp: clock() }],
+    webmcpActivity: [],
     aiStatus: "active",
     aiAutonomy: true,
   };
@@ -226,7 +236,14 @@ export const boardStore = {
       if (saved) {
         const parsed = JSON.parse(saved) as Partial<BoardState>;
         if (Array.isArray(parsed.notes) && Array.isArray(parsed.connections) && Array.isArray(parsed.activity)) {
-          board = { ...newBoard(), ...parsed, members: Array.isArray(parsed.members) ? parsed.members : defaultMembers, strokes: Array.isArray(parsed.strokes) ? parsed.strokes : [], aiStatus: "active" };
+          board = {
+            ...newBoard(),
+            ...parsed,
+            members: Array.isArray(parsed.members) ? parsed.members : defaultMembers,
+            strokes: Array.isArray(parsed.strokes) ? parsed.strokes : [],
+            webmcpActivity: Array.isArray(parsed.webmcpActivity) ? parsed.webmcpActivity : [],
+            aiStatus: "active",
+          };
           notify();
         }
       }
@@ -245,6 +262,7 @@ export const boardStore = {
       clusters: Array.isArray(document.clusters) ? document.clusters : [],
       strokes: Array.isArray(document.strokes) ? document.strokes : [],
       activity: Array.isArray(document.activity) ? document.activity : [],
+      webmcpActivity: Array.isArray(document.webmcpActivity) ? document.webmcpActivity : [],
       // "thinking" is transient UI state and must never get stuck for collaborators.
       aiStatus: "active" as const,
       aiAutonomy: typeof document.aiAutonomy === "boolean" ? document.aiAutonomy : true,
@@ -281,6 +299,16 @@ export const boardStore = {
   },
   setAiAutonomy(enabled: boolean) {
     commit({ ...board, aiAutonomy: enabled });
+  },
+  recordWebMCPTool(tool: string, detail: string) {
+    const entry: WebMCPActivity = {
+      id: `webmcp-${Date.now()}-${Math.round(Math.random() * 1000)}`,
+      tool: tool.trim().slice(0, 80) || "unknown_tool",
+      detail: detail.trim().slice(0, 180) || "Completed a WebMCP action.",
+      timestamp: clock(),
+    };
+    commit({ ...board, webmcpActivity: [entry, ...board.webmcpActivity].slice(0, 30) });
+    return entry;
   },
   createNote(input: { id?: string; text: string; authorId?: MemberId; color?: StickyColor; x?: number; y?: number }) {
     const text = input.text.trim();

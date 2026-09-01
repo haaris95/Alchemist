@@ -20,6 +20,7 @@ type ToolCallbacks = {
   onDrawStroke: (input: { points: Point[]; color?: string; width?: number }) => unknown;
   onCreateDiagram: (input: Omit<DiagramInput, "authorId">) => unknown;
   onPitchIn: (signal: AbortSignal) => Promise<unknown>;
+  onToolUsed: (entry: { tool: string; detail: string }) => void;
   onStatus: (status: "ready" | "unavailable") => void;
 };
 
@@ -95,7 +96,7 @@ function requiredDiagram(input: Record<string, unknown>): Omit<DiagramInput, "au
 export function useWebMCPTools(callbacks: ToolCallbacks) {
   const {
     onGetBoard, onCreateSession, onCreateNote, onMoveNote, onUpdateNote, onDeleteNote, onAddComment,
-    onCreateConnection, onUpdateConnection, onDeleteConnection, onDrawStroke, onCreateDiagram, onPitchIn, onStatus,
+    onCreateConnection, onUpdateConnection, onDeleteConnection, onDrawStroke, onCreateDiagram, onPitchIn, onToolUsed, onStatus,
   } = callbacks;
 
   useEffect(() => {
@@ -105,29 +106,33 @@ export function useWebMCPTools(callbacks: ToolCallbacks) {
     }
 
     const controller = new AbortController();
+    const runTool = <T,>(tool: string, detail: string, operation: () => T | Promise<T>) => Promise.resolve().then(operation).then((result) => {
+      onToolUsed({ tool, detail });
+      return result;
+    });
     const registration = Promise.all([
       document.modelContext.registerTool({
         name: "get_board", title: "Inspect the AIchemist board",
         description: "Return the current AIchemist board: session title and brief, notes, authors, positions, connections, sketches, clusters, and comment counts. Use this before contributing.",
-        inputSchema: { ...schemaBase, properties: {} }, annotations: { readOnlyHint: true }, execute: () => onGetBoard(),
+        inputSchema: { ...schemaBase, properties: {} }, annotations: { readOnlyHint: true }, execute: () => runTool("get_board", "Inspected the current board state.", onGetBoard),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "create_session", title: "Start a blank AIchemist session",
         description: "Replace the current local board with a blank named session. Include an optional brief with the goal, constraints, and desired outcome so AIchemist can give grounded initial feedback. Use only when the user asks to begin a new session.",
         inputSchema: { ...schemaBase, properties: { title: { type: "string", minLength: 3, maxLength: 140, description: "The session question or title." }, description: { type: "string", maxLength: 900, description: "Optional context: goal, participants, constraints, and desired outcome." } }, required: ["title"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onCreateSession({ title: requiredText(input, "title"), description: optionalText(input, "description") }),
+        execute: (input) => runTool("create_session", "Started a new named session.", () => onCreateSession({ title: requiredText(input, "title"), description: optionalText(input, "description") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "create_note", title: "Add an AIchemist sticky note",
         description: "Create a new sticky note on the shared board as AIchemist. It visibly updates the canvas and activity feed.",
         inputSchema: { ...schemaBase, properties: { text: { type: "string", minLength: 3, maxLength: 280, description: "The idea, question, or challenge to add." }, color: colorSchema, ...positionSchema }, required: ["text"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onCreateNote({ text: requiredText(input, "text"), color: optionalColor(input), x: optionalNumber(input, "x"), y: optionalNumber(input, "y") }),
+        execute: (input) => runTool("create_note", "Added an AI sticky note.", () => onCreateNote({ text: requiredText(input, "text"), color: optionalColor(input), x: optionalNumber(input, "x"), y: optionalNumber(input, "y") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "move_note", title: "Move a sticky note",
         description: "Move an existing note to a new position on the shared canvas. Use note IDs returned by get_board.",
         inputSchema: { ...schemaBase, properties: { noteId: { type: "string", description: "ID of the note to move." }, ...positionSchema }, required: ["noteId", "x", "y"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onMoveNote({ noteId: requiredText(input, "noteId"), x: requiredNumber(input, "x"), y: requiredNumber(input, "y") }),
+        execute: (input) => runTool("move_note", "Moved a sticky note on the canvas.", () => onMoveNote({ noteId: requiredText(input, "noteId"), x: requiredNumber(input, "x"), y: requiredNumber(input, "y") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "update_note", title: "Edit a sticky note",
@@ -136,56 +141,56 @@ export function useWebMCPTools(callbacks: ToolCallbacks) {
         execute: (input) => {
           const result: NoteUpdate = { noteId: requiredText(input, "noteId"), text: optionalText(input, "text"), color: optionalColor(input), x: optionalNumber(input, "x"), y: optionalNumber(input, "y") };
           if (result.text === undefined && result.color === undefined && result.x === undefined && result.y === undefined) throw new TypeError("update_note needs at least one field to change");
-          return onUpdateNote(result);
+          return runTool("update_note", "Updated a sticky note.", () => onUpdateNote(result));
         },
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "delete_note", title: "Delete a sticky note",
         description: "Remove a note and its related connections from the shared board. Use only when the user asks to remove the idea.",
         inputSchema: { ...schemaBase, properties: { noteId: { type: "string", description: "ID of the note to remove." } }, required: ["noteId"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onDeleteNote({ noteId: requiredText(input, "noteId") }),
+        execute: (input) => runTool("delete_note", "Removed a sticky note and its links.", () => onDeleteNote({ noteId: requiredText(input, "noteId") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "add_comment", title: "Comment on a board idea",
         description: "Add an AIchemist comment to an existing sticky note. The comment appears in the note's focus panel and activity feed.",
         inputSchema: { ...schemaBase, properties: { noteId: { type: "string", description: "ID of the note to comment on." }, text: { type: "string", minLength: 1, maxLength: 500, description: "Comment text." } }, required: ["noteId", "text"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onAddComment({ noteId: requiredText(input, "noteId"), text: requiredText(input, "text") }),
+        execute: (input) => runTool("add_comment", "Added a comment to a sticky note.", () => onAddComment({ noteId: requiredText(input, "noteId"), text: requiredText(input, "text") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "create_connection", title: "Connect two board ideas",
         description: "Create a directed relationship between two existing notes. The connector appears on the shared canvas and records AIchemist's action.",
         inputSchema: { ...schemaBase, properties: { fromId: { type: "string", description: "ID of the source note." }, toId: { type: "string", description: "ID of the destination note." }, label: { type: "string", maxLength: 50, description: "Optional relationship label." } }, required: ["fromId", "toId"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onCreateConnection({ fromId: requiredText(input, "fromId"), toId: requiredText(input, "toId"), label: optionalText(input, "label") }),
+        execute: (input) => runTool("create_connection", "Connected two board ideas.", () => onCreateConnection({ fromId: requiredText(input, "fromId"), toId: requiredText(input, "toId"), label: optionalText(input, "label") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "update_connection", title: "Edit a connection label",
         description: "Update or clear the label on an existing connection. Use an ID from get_board.",
         inputSchema: { ...schemaBase, properties: { connectionId: { type: "string", description: "ID of the connection to update." }, label: { type: "string", maxLength: 50, description: "New label; an empty string clears it." } }, required: ["connectionId", "label"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onUpdateConnection({ connectionId: requiredText(input, "connectionId"), label: optionalText(input, "label") }),
+        execute: (input) => runTool("update_connection", "Updated a relationship label.", () => onUpdateConnection({ connectionId: requiredText(input, "connectionId"), label: optionalText(input, "label") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "delete_connection", title: "Delete a connection",
         description: "Remove a relationship line from the shared board. Use only when the user asks to remove that connection.",
         inputSchema: { ...schemaBase, properties: { connectionId: { type: "string", description: "ID of the connection to remove." } }, required: ["connectionId"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onDeleteConnection({ connectionId: requiredText(input, "connectionId") }),
+        execute: (input) => runTool("delete_connection", "Removed a board relationship.", () => onDeleteConnection({ connectionId: requiredText(input, "connectionId") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "draw_stroke", title: "Draw on the shared canvas",
         description: "Add a freehand AIchemist sketch to the canvas. Points use the same canvas coordinate system as notes.",
         inputSchema: { ...schemaBase, properties: { points: { type: "array", minItems: 2, items: { type: "object", additionalProperties: false, properties: { x: { type: "number" }, y: { type: "number" } }, required: ["x", "y"] }, description: "At least two ordered canvas points." }, color: { type: "string", description: "Optional CSS color for the stroke." }, width: { type: "number", minimum: 1, maximum: 12, description: "Optional stroke width." } }, required: ["points"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onDrawStroke({ points: requiredPoints(input), color: optionalText(input, "color"), width: optionalNumber(input, "width") }),
+        execute: (input) => runTool("draw_stroke", "Drew a freehand stroke on the canvas.", () => onDrawStroke({ points: requiredPoints(input), color: optionalText(input, "color"), width: optionalNumber(input, "width") })),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "create_diagram", title: "Create a deterministic visual map",
         description: "Create a structured board diagram. Choose a flow for a sequence, comparison for alternatives, or tradeoff for tensions; provide labeled nodes and their relationships. AIchemist deterministically places the nodes, cluster, and connectors.",
         inputSchema: { ...schemaBase, properties: { template: { type: "string", enum: ["flow", "comparison", "tradeoff"], description: "The semantic diagram pattern." }, title: { type: "string", minLength: 3, maxLength: 80, description: "Visible label for the diagram cluster." }, nodes: { type: "array", minItems: 2, maxItems: 4, items: { type: "object", additionalProperties: false, properties: { label: { type: "string", minLength: 3, maxLength: 120 }, color: colorSchema }, required: ["label"] }, description: "Two to four concise diagram nodes." }, edges: { type: "array", maxItems: 6, items: { type: "object", additionalProperties: false, properties: { from: { type: "integer", minimum: 0, maximum: 3 }, to: { type: "integer", minimum: 0, maximum: 3 }, label: { type: "string", maxLength: 50 } }, required: ["from", "to"] }, description: "Optional directed relationships by node index." } }, required: ["template", "title", "nodes"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onCreateDiagram(requiredDiagram(input)),
+        execute: (input) => runTool("create_diagram", "Created a deterministic visual map.", () => onCreateDiagram(requiredDiagram(input))),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "pitch_in", title: "Let AIchemist pitch in",
         description: "Examine the current shared board and add one meaningful AIchemist contribution. Before the team has enough human context, provide grounded feedback rather than inventing a new direction.",
         inputSchema: { ...schemaBase, properties: {} }, annotations: { readOnlyHint: false },
-        execute: (_input, options) => onPitchIn(options?.signal ?? new AbortController().signal),
+        execute: (_input, options) => runTool("pitch_in", "Asked AIchemist to inspect and contribute to the board.", () => onPitchIn(options?.signal ?? new AbortController().signal)),
       }, { signal: controller.signal }),
     ]);
 
@@ -193,5 +198,5 @@ export function useWebMCPTools(callbacks: ToolCallbacks) {
       if (!controller.signal.aborted) { console.warn("AIchemist WebMCP registration failed", error); onStatus("unavailable"); }
     });
     return () => controller.abort();
-  }, [onAddComment, onCreateConnection, onCreateDiagram, onCreateNote, onCreateSession, onDeleteConnection, onDeleteNote, onDrawStroke, onGetBoard, onMoveNote, onPitchIn, onStatus, onUpdateConnection, onUpdateNote]);
+  }, [onAddComment, onCreateConnection, onCreateDiagram, onCreateNote, onCreateSession, onDeleteConnection, onDeleteNote, onDrawStroke, onGetBoard, onMoveNote, onPitchIn, onStatus, onToolUsed, onUpdateConnection, onUpdateNote]);
 }
