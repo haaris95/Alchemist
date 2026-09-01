@@ -1,4 +1,4 @@
-import type { BoardConnection, BoardNote, BoardState } from "@/lib/board";
+import type { BoardConnection, BoardNote, BoardState, BoardStroke } from "@/lib/board";
 import type { AiContribution, PitchIntent } from "./pitch";
 
 function clock() {
@@ -19,11 +19,19 @@ export function applyAiContribution(document: BoardState, contribution: AiContri
   const connection: BoardConnection[] = contribution.connectToNoteId && document.notes.some((item) => item.id === contribution.connectToNoteId)
     ? [{ id: `connection-ai-${Date.now()}-${Math.round(Math.random() * 1000)}`, fromId: contribution.connectToNoteId, toId: note.id, label: contribution.connectionLabel || undefined, authorId: "aichemist" }]
     : [];
-  const message = intent === "starter" ? "started the room with an original direction" : intent === "challenge" ? "challenged an assumption on the board" : "introduced an independent direction";
+  const strokes: BoardStroke[] = contribution.strokes.map((stroke, index) => ({
+    id: `stroke-ai-${Date.now()}-${index}-${Math.round(Math.random() * 1000)}`,
+    points: stroke.points,
+    color: stroke.color,
+    width: stroke.width,
+    authorId: "aichemist",
+  }));
+  const message = intent === "sketch" ? "added a visual sketch to frame the conversation" : intent === "feedback" ? "gave grounded feedback on the session context" : intent === "challenge" ? "challenged an assumption on the board" : "introduced an independent direction";
   return {
     ...document,
     notes: [...document.notes, note],
     connections: [...document.connections, ...connection],
+    strokes: [...document.strokes, ...strokes],
     activity: [{ id: `activity-ai-${Date.now()}-${Math.round(Math.random() * 1000)}`, actorId: "aichemist", message, timestamp: clock() }, ...document.activity].slice(0, 16),
     aiStatus: "active",
   };

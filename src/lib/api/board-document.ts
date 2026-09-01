@@ -4,6 +4,7 @@ export function isBoardDocument(value: unknown): value is BoardState {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const document = value as Partial<BoardState>;
   return typeof document.title === "string"
+    && (document.description === undefined || (typeof document.description === "string" && document.description.length <= 900))
     && Array.isArray(document.members)
     && Array.isArray(document.notes)
     && Array.isArray(document.connections)

@@ -20,13 +20,16 @@ function initialLocalMember() {
 }
 
 export function useCurrentMember() {
-  const [member, setMember] = useState<BoardMember>(initialLocalMember);
+  const [member, setMember] = useState<BoardMember>(localMember);
   const [loading, setLoading] = useState(isSupabaseConfigured());
 
   useEffect(() => {
     let active = true;
     if (!isSupabaseConfigured()) {
-      return;
+      const syncLocalProfile = window.setTimeout(() => {
+        if (active) setMember(initialLocalMember());
+      }, 0);
+      return () => { active = false; window.clearTimeout(syncLocalProfile); };
     }
 
     void (async () => {

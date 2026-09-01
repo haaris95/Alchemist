@@ -33,7 +33,10 @@ async function run(request: Request) {
   const failures: string[] = [];
   for (const candidate of candidates ?? []) {
     if (!isBoardDocument(candidate.document)) continue;
-    const intent: PitchIntent = candidate.document.notes.length === 0 ? "starter" : candidate.document.notes.length % 3 === 0 ? "challenge" : "independent";
+    const humanNotes = candidate.document.notes.filter((note) => note.authorId !== "aichemist").length;
+    const hasBrief = typeof candidate.document.description === "string" && candidate.document.description.trim().length >= 24;
+    if (humanNotes === 0 && !hasBrief) continue;
+    const intent: PitchIntent = humanNotes < 2 ? "feedback" : humanNotes % 3 === 0 ? "challenge" : "independent";
     try {
       const contribution = await generateAiContribution(agentBoardFromDocument(candidate.document), intent);
       const document = applyAiContribution(candidate.document, contribution, intent);

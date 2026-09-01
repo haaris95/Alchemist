@@ -8,7 +8,7 @@ type NoteUpdate = { noteId: string; text?: string; color?: StickyColor; x?: numb
 
 type ToolCallbacks = {
   onGetBoard: () => unknown;
-  onCreateSession: (input: { title: string }) => unknown;
+  onCreateSession: (input: { title: string; description?: string }) => unknown;
   onCreateNote: (input: { text: string; color?: StickyColor; x?: number; y?: number }) => unknown;
   onMoveNote: (input: { noteId: string; x: number; y: number }) => unknown;
   onUpdateNote: (input: NoteUpdate) => unknown;
@@ -85,14 +85,14 @@ export function useWebMCPTools(callbacks: ToolCallbacks) {
     const registration = Promise.all([
       document.modelContext.registerTool({
         name: "get_board", title: "Inspect the AIchemist board",
-        description: "Return the current AIchemist board: session title, notes, authors, positions, connections, sketches, clusters, and comment counts. Use this before contributing.",
+        description: "Return the current AIchemist board: session title and brief, notes, authors, positions, connections, sketches, clusters, and comment counts. Use this before contributing.",
         inputSchema: { ...schemaBase, properties: {} }, annotations: { readOnlyHint: true }, execute: () => onGetBoard(),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "create_session", title: "Start a blank AIchemist session",
-        description: "Replace the current local board with a blank named session. Use only when the user asks to begin a new session.",
-        inputSchema: { ...schemaBase, properties: { title: { type: "string", minLength: 3, maxLength: 140, description: "The session question or title." } }, required: ["title"] }, annotations: { readOnlyHint: false },
-        execute: (input) => onCreateSession({ title: requiredText(input, "title") }),
+        description: "Replace the current local board with a blank named session. Include an optional brief with the goal, constraints, and desired outcome so AIchemist can give grounded initial feedback. Use only when the user asks to begin a new session.",
+        inputSchema: { ...schemaBase, properties: { title: { type: "string", minLength: 3, maxLength: 140, description: "The session question or title." }, description: { type: "string", maxLength: 900, description: "Optional context: goal, participants, constraints, and desired outcome." } }, required: ["title"] }, annotations: { readOnlyHint: false },
+        execute: (input) => onCreateSession({ title: requiredText(input, "title"), description: optionalText(input, "description") }),
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "create_note", title: "Add an AIchemist sticky note",
@@ -154,7 +154,7 @@ export function useWebMCPTools(callbacks: ToolCallbacks) {
       }, { signal: controller.signal }),
       document.modelContext.registerTool({
         name: "pitch_in", title: "Let AIchemist pitch in",
-        description: "Examine the current shared board, identify a productive assumption or gap, then add one meaningful AIchemist note and connect it to relevant ideas.",
+        description: "Examine the current shared board and add one meaningful AIchemist contribution. Before the team has enough human context, provide grounded feedback rather than inventing a new direction.",
         inputSchema: { ...schemaBase, properties: {} }, annotations: { readOnlyHint: false },
         execute: (_input, options) => onPitchIn(options?.signal ?? new AbortController().signal),
       }, { signal: controller.signal }),

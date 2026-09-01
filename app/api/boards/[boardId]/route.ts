@@ -32,10 +32,11 @@ export async function PATCH(request: Request, { params }: Context) {
     return NextResponse.json({ error: "A complete board document and valid title are required." }, { status: 400 });
   }
   const aiAutonomy = typeof payload?.aiAutonomy === "boolean" ? payload.aiAutonomy : document.aiAutonomy;
-  const changes: { document: typeof document; title?: string; ai_autonomy?: boolean; last_human_activity_at?: string } = { document };
+  const changes: { document: typeof document; title?: string; ai_autonomy?: boolean; last_human_activity_at?: string; last_ai_pitched_at?: string } = { document };
   if (title) changes.title = title;
   changes.ai_autonomy = aiAutonomy;
-  if (document.activity[0]?.actorId !== "aichemist") changes.last_human_activity_at = new Date().toISOString();
+  if (document.activity[0]?.actorId === "aichemist") changes.last_ai_pitched_at = new Date().toISOString();
+  else changes.last_human_activity_at = new Date().toISOString();
   const { data, error } = await session.supabase
     .from("boards")
     .update(changes)

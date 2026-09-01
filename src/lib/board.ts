@@ -55,6 +55,7 @@ export type ActivityEvent = {
 
 export type BoardState = {
   title: string;
+  description: string;
   members: BoardMember[];
   notes: BoardNote[];
   connections: BoardConnection[];
@@ -82,6 +83,7 @@ function clock() {
 function newBoard(): BoardState {
   return {
     title: "How might we reduce food waste?",
+    description: "Explore practical ways restaurants and communities can prevent edible food from becoming waste.",
     members: defaultMembers.map((member) => ({ ...member })),
     notes: [
       {
@@ -135,9 +137,10 @@ function fallbackHuman(memberId: MemberId): BoardMember {
   return { id: memberId, name: "You", initials: "Y", role: "Human", color: "#f4b860" };
 }
 
-export function createBlankBoard(title: string, actor: BoardMember = defaultMembers[0]): BoardState {
+export function createBlankBoard(title: string, actor: BoardMember = defaultMembers[0], description = ""): BoardState {
   return {
     title: title.trim() || "Untitled brainstorm",
+    description: description.trim().slice(0, 900),
     members: [
       { ...actor, role: "Human" },
       ...blankSessionMembers.filter((member) => member.id === "aichemist").map((member) => ({ ...member })),
@@ -215,6 +218,7 @@ export const boardStore = {
     const next = {
       ...newBoard(),
       ...document,
+      description: typeof document.description === "string" ? document.description.trim().slice(0, 900) : "",
       members: Array.isArray(document.members) ? document.members : defaultMembers,
       notes: Array.isArray(document.notes) ? document.notes : [],
       connections: Array.isArray(document.connections) ? document.connections : [],
@@ -233,9 +237,9 @@ export const boardStore = {
   reset() {
     commit(newBoard());
   },
-  createSession(title: string, authorId: MemberId = "haaris") {
+  createSession(title: string, authorId: MemberId = "haaris", description = "") {
     const currentHuman = board.members.find((item) => item.id === authorId) ?? fallbackHuman(authorId);
-    commit(createBlankBoard(title, currentHuman));
+    commit(createBlankBoard(title, currentHuman, description));
   },
   setCurrentUser(name: string, memberId: MemberId = "haaris") {
     const trimmed = name.trim();
@@ -414,6 +418,7 @@ export const boardStore = {
   boardForAgent() {
     return {
       title: board.title,
+      description: board.description,
       members: board.members.map(({ id, name, role }) => ({ id, name, role })),
       notes: board.notes.map(({ id, text, authorId, x, y, comments }) => ({ id, text, author: member(authorId).name, position: { x, y }, comments: comments.length })),
       connections: board.connections.map(({ id, fromId, toId, label }) => ({ id, fromId, toId, label })),
