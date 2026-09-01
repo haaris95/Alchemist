@@ -1,4 +1,5 @@
-export type MemberId = "haaris" | "sarah" | "aichemist";
+/** A human's Supabase user id, a local-preview id, or the reserved AI member id. */
+export type MemberId = string;
 export type StickyColor = "sun" | "rose" | "mint" | "lavender";
 
 export type BoardMember = {
@@ -61,6 +62,7 @@ export type BoardState = {
   strokes: BoardStroke[];
   activity: ActivityEvent[];
   aiStatus: "active" | "thinking";
+  aiAutonomy: boolean;
 };
 
 const STORAGE_KEY = "aichemist-board-v1";
@@ -125,19 +127,28 @@ function newBoard(): BoardState {
       { id: "activity-surplus", actorId: "haaris", message: 'added “Restaurant surplus”', timestamp: "10:42 AM" },
     ],
     aiStatus: "active",
+    aiAutonomy: true,
   };
 }
 
-function blankBoard(title: string, actorId: MemberId): BoardState {
+function fallbackHuman(memberId: MemberId): BoardMember {
+  return { id: memberId, name: "You", initials: "Y", role: "Human", color: "#f4b860" };
+}
+
+export function createBlankBoard(title: string, actor: BoardMember = defaultMembers[0]): BoardState {
   return {
     title: title.trim() || "Untitled brainstorm",
-    members: blankSessionMembers.map((member) => ({ ...member })),
+    members: [
+      { ...actor, role: "Human" },
+      ...blankSessionMembers.filter((member) => member.id === "aichemist").map((member) => ({ ...member })),
+    ],
     notes: [],
     connections: [],
     clusters: [],
     strokes: [],
-    activity: [{ id: "activity-session", actorId, message: "started a new blank session", timestamp: clock() }],
+    activity: [{ id: `activity-session-${Date.now()}-${Math.round(Math.random() * 1000)}`, actorId: actor.id, message: "started a new blank session", timestamp: clock() }],
     aiStatus: "active",
+    aiAutonomy: true,
   };
 }
 
@@ -161,7 +172,7 @@ function commit(next: BoardState, shouldPersist = true) {
 }
 
 function member(memberId: MemberId) {
-  return board.members.find((item) => item.id === memberId) ?? board.members[0];
+  return board.members.find((item) => item.id === memberId) ?? fallbackHuman(memberId);
 }
 
 function activity(actorId: MemberId, message: string): ActivityEvent {
@@ -200,23 +211,52 @@ export const boardStore = {
       window.localStorage.removeItem(STORAGE_KEY);
     }
   },
+  replaceDocument(document: BoardState) {
+    const next = {
+      ...newBoard(),
+      ...document,
+      members: Array.isArray(document.members) ? document.members : defaultMembers,
+      notes: Array.isArray(document.notes) ? document.notes : [],
+      connections: Array.isArray(document.connections) ? document.connections : [],
+      clusters: Array.isArray(document.clusters) ? document.clusters : [],
+      strokes: Array.isArray(document.strokes) ? document.strokes : [],
+      activity: Array.isArray(document.activity) ? document.activity : [],
+      // "thinking" is transient UI state and must never get stuck for collaborators.
+      aiStatus: "active" as const,
+      aiAutonomy: typeof document.aiAutonomy === "boolean" ? document.aiAutonomy : true,
+    };
+    commit(next, false);
+  },
+  documentForPersistence(): BoardState {
+    return { ...board, aiStatus: "active" };
+  },
   reset() {
     commit(newBoard());
   },
   createSession(title: string, authorId: MemberId = "haaris") {
-    const session = blankBoard(title, authorId);
-    const currentHuman = board.members.find((member) => member.id === "haaris");
-    if (currentHuman) session.members = session.members.map((member) => member.id === "haaris" ? { ...currentHuman } : member);
-    commit(session);
+    const currentHuman = board.members.find((item) => item.id === authorId) ?? fallbackHuman(authorId);
+    commit(createBlankBoard(title, currentHuman));
   },
-  setCurrentUser(name: string) {
+  setCurrentUser(name: string, memberId: MemberId = "haaris") {
     const trimmed = name.trim();
     if (!trimmed) return;
     const initials = trimmed.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-    commit({ ...board, members: board.members.map((item) => item.id === "haaris" ? { ...item, name: trimmed, initials } : item) });
+    const existing = board.members.find((item) => item.id === memberId);
+    const currentUser: BoardMember = existing
+      ? { ...existing, name: trimmed, initials, role: "Human" }
+      : { id: memberId, name: trimmed, initials, role: "Human", color: "#f4b860" };
+    commit({
+      ...board,
+      members: existing
+        ? board.members.map((item) => item.id === memberId ? currentUser : item)
+        : [currentUser, ...board.members],
+    });
   },
   setAiStatus(status: BoardState["aiStatus"]) {
     commit({ ...board, aiStatus: status }, false);
+  },
+  setAiAutonomy(enabled: boolean) {
+    commit({ ...board, aiAutonomy: enabled });
   },
   createNote(input: { id?: string; text: string; authorId?: MemberId; color?: StickyColor; x?: number; y?: number }) {
     const text = input.text.trim();
