@@ -186,7 +186,7 @@ function fallbackDiagram(board: AgentBoard): AiContribution {
 
 export async function generateAiContribution(board: AgentBoard, intent: PitchIntent): Promise<AiContribution> {
   const apiKey = process.env.GROQ_API_KEY?.trim();
-  if (!apiKey) throw new AiPitchError("Groq is not configured. Add GROQ_API_KEY to .env.local and restart the dev server.", 503);
+  if (!apiKey) throw new AiPitchError("Groq is not configured. Set GROQ_API_KEY in Vercel Environment Variables for production, or in .env.local for local development, then redeploy or restart.", 503);
   const model = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
   let upstream: Response;
   try {

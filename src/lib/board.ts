@@ -63,6 +63,8 @@ export type WebMCPActivity = {
   tool: string;
   detail: string;
   timestamp: string;
+  /** Missing on sessions saved before source-aware tool tracing shipped. */
+  source?: "webmcp" | "in-app";
 };
 
 export type BoardState = {
@@ -197,6 +199,31 @@ function activity(actorId: MemberId, message: string): ActivityEvent {
   return { id: `activity-${Date.now()}-${Math.round(Math.random() * 1000)}`, actorId, message, timestamp: clock() };
 }
 
+function inferredAiToolActivity(document: Pick<BoardState, "notes" | "connections" | "strokes">): WebMCPActivity[] {
+  const notes = document.notes.filter((note) => note.authorId === "aichemist").map((note) => ({
+    id: "inferred-note-" + note.id,
+    tool: "create_note",
+    detail: "AIchemist added a sticky note before tool tracing was enabled.",
+    timestamp: note.createdAt,
+    source: "in-app" as const,
+  }));
+  const connections = document.connections.filter((connection) => connection.authorId === "aichemist").map((connection) => ({
+    id: "inferred-connection-" + connection.id,
+    tool: "create_connection",
+    detail: "AIchemist connected two board ideas before tool tracing was enabled.",
+    timestamp: "Earlier",
+    source: "in-app" as const,
+  }));
+  const strokes = document.strokes.filter((stroke) => stroke.authorId === "aichemist").map((stroke) => ({
+    id: "inferred-stroke-" + stroke.id,
+    tool: "draw_stroke",
+    detail: "AIchemist drew on the board before tool tracing was enabled.",
+    timestamp: "Earlier",
+    source: "in-app" as const,
+  }));
+  return [...notes, ...connections, ...strokes].slice(0, 30);
+}
+
 function noteLabel(note: BoardNote | undefined) {
   return note ? `“${note.text.length > 31 ? `${note.text.slice(0, 31)}…` : note.text}”` : "a note";
 }
@@ -241,7 +268,7 @@ export const boardStore = {
             ...parsed,
             members: Array.isArray(parsed.members) ? parsed.members : defaultMembers,
             strokes: Array.isArray(parsed.strokes) ? parsed.strokes : [],
-            webmcpActivity: Array.isArray(parsed.webmcpActivity) ? parsed.webmcpActivity : [],
+            webmcpActivity: Array.isArray(parsed.webmcpActivity) && parsed.webmcpActivity.length ? parsed.webmcpActivity : inferredAiToolActivity({ ...newBoard(), ...parsed }),
             aiStatus: "active",
           };
           notify();
@@ -262,7 +289,7 @@ export const boardStore = {
       clusters: Array.isArray(document.clusters) ? document.clusters : [],
       strokes: Array.isArray(document.strokes) ? document.strokes : [],
       activity: Array.isArray(document.activity) ? document.activity : [],
-      webmcpActivity: Array.isArray(document.webmcpActivity) ? document.webmcpActivity : [],
+      webmcpActivity: Array.isArray(document.webmcpActivity) && document.webmcpActivity.length ? document.webmcpActivity : inferredAiToolActivity(document),
       // "thinking" is transient UI state and must never get stuck for collaborators.
       aiStatus: "active" as const,
       aiAutonomy: typeof document.aiAutonomy === "boolean" ? document.aiAutonomy : true,
@@ -300,12 +327,13 @@ export const boardStore = {
   setAiAutonomy(enabled: boolean) {
     commit({ ...board, aiAutonomy: enabled });
   },
-  recordWebMCPTool(tool: string, detail: string) {
+  recordWebMCPTool(tool: string, detail: string, source: "webmcp" | "in-app" = "webmcp") {
     const entry: WebMCPActivity = {
       id: `webmcp-${Date.now()}-${Math.round(Math.random() * 1000)}`,
       tool: tool.trim().slice(0, 80) || "unknown_tool",
       detail: detail.trim().slice(0, 180) || "Completed a WebMCP action.",
       timestamp: clock(),
+      source,
     };
     commit({ ...board, webmcpActivity: [entry, ...board.webmcpActivity].slice(0, 30) });
     return entry;
